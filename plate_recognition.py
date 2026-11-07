@@ -49,7 +49,11 @@ def main(argv=None, recognizer_factory=PlateRecognizer):
         with Image.open(args.image) as input_image:
             image = ImageOps.exif_transpose(input_image).convert('RGB')
         if recognizer_factory is PlateRecognizer and not args.weights.is_file():
-            raise ValueError(f'Detector weights not found: {args.weights}. Run python download_models.py first.')
+            raise ValueError(
+                f'Detector weights not found: {args.weights}. Check the --weights path. '
+                'For the original pretrained model, run python download_models.py; '
+                'for fine-tuned weights, run python train_detector.py.'
+            )
         recognizer = recognizer_factory(args.weights)
         detections = recognizer.recognize(image)
         draw = ImageDraw.Draw(image)

@@ -40,7 +40,9 @@ The dataset is [European License Plate Dataset (ELPD)](https://www.kaggle.com/da
 python plate_recognition.py train-data/plates/YOLO/images/Train/filename_prefix_00003_.png --output output/demo.png
 ```
 
-The command prints the recognized text for each detected plate and saves an image with boxes and text. Empty or unreadable results are possible. Try your own permitted image by replacing the input path. Use `--weights path/to/weights.pt` for a compatible detector. The program does not overwrite its input image.
+The command accepts still images readable by Pillow, including JPEG and PNG, prints the recognized text for each detected plate, and saves an image with boxes and text. Use a `.png` or `.jpg` extension for the output. Empty or unreadable results are possible. Try your own permitted image by replacing the input path. Use `--weights path/to/weights.pt` for a compatible detector. The program does not overwrite its input image.
+
+The initial target is ordinary single-line passenger-vehicle plates similar to German and Polish plates. Fine-tuning uses synthetic, predominantly German-style data; country coverage and performance on real photos have not been measured. Motorcycle, two-line, temporary and special plates are outside the initial scope.
 
 The detector finds rectangles likely to contain plates; each rectangle is cropped and given to EasyOCR. The program joins the text fragments, converts them to uppercase, and removes spaces and punctuation. Both models run on CPU. A local smoke test on an M4 Pro detected two plates in the example image, read one as `BBXC1533`, and marked the other unreadable; a separate public-domain [close-up photograph](https://commons.wikimedia.org/wiki/File:DE_car_registration_plate.jpg) produced no detections. The user later reported a successful run on a real image, returning `PO35802` and saving an annotated image. These examples are not an accuracy measurement. Detection and OCR errors are expected, especially on blurry, small, unusual, or real-world images. No accuracy has been measured yet.
 
@@ -79,7 +81,7 @@ Each run prints elapsed time and its output location. Best weights are saved und
 python plate_recognition.py train-data/plates/YOLO/images/Train/filename_prefix_00003_.png --weights output/training/full/weights/best.pt --output output/trained-demo.png
 ```
 
-Replace the weight path if your run printed a different directory. Weights, images, and output are not committed. Teammates can reproduce weights using the documented data and commands; review the dataset attribution and the pretrained model/runtime licenses before distributing derived weights. Validation metrics in the training log are for synthetic validation data and are not a held-out real-world accuracy result. In a smoke test using the fine-tuned weights on a real image, the detector found a plate but OCR returned one extra character compared with the earlier pretrained-detector run.
+The CLI uses the original pretrained detector by default; pass `--weights` as shown to use your fine-tuned detector. Replace the weight path if your run printed a different directory. Weights, images, and output are not committed. Teammates can reproduce weights using the documented data and commands; review the dataset attribution and the pretrained model/runtime licenses before distributing derived weights. Validation metrics in the training log are for synthetic validation data and are not a held-out real-world accuracy result. In a smoke test using the fine-tuned weights on the user-provided `train-data/car.png`, the detector found a plate but OCR returned one extra character compared with the earlier pretrained-detector run. The smoke test used `python plate_recognition.py train-data/car.png --weights output/training/full/weights/best.pt --output output/ticket-04-demo.png`.
 
 ## Run checks
 

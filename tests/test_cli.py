@@ -111,6 +111,58 @@ class CommandLineTests(unittest.TestCase):
             self.assertEqual(code, 0)
             self.assertEqual(recognizer.size, (20, 40))
 
+    def test_corrupt_image_is_reported_through_cli(self):
+        with tempfile.TemporaryDirectory() as folder:
+            source = Path(folder) / 'broken.png'
+            source.write_text('not an image')
+            result = subprocess.run([sys.executable, 'plate_recognition.py', str(source)], capture_output=True, text=True)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn('Error:', result.stderr)
+            self.assertNotIn('Traceback', result.stderr)
+
+    def test_missing_custom_weights_are_reported_through_cli(self):
+        with tempfile.TemporaryDirectory() as folder:
+            source = Path(folder) / 'car.png'
+            Image.new('RGB', (40, 30)).save(source)
+            result = subprocess.run([sys.executable, 'plate_recognition.py', str(source), '--weights', str(Path(folder) / 'missing.pt')], capture_output=True, text=True)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn('Detector weights not found', result.stderr)
+            self.assertIn('Check the --weights path', result.stderr)
+            self.assertNotIn('Traceback', result.stderr)
+
+    def test_cli_runs_detector_and_ocr_for_each_plate(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            source, output, weights = root / 'car.png', root / 'out.png', root / 'model.pt'
+            Image.new('RGB', (200, 100), 'white').save(source)
+            weights.touch()
+            (root / 'ultralytics.py').write_text("""
+class Coordinates:
+    def tolist(self): return [[10, 10, 100, 40], [20, 50, 120, 80]]
+class Boxes:
+    xyxy = Coordinates()
+class Result:
+    boxes = Boxes()
+class YOLO:
+    def __init__(self, path): pass
+    def predict(self, image, **kwargs): return [Result()]
+""")
+            (root / 'easyocr.py').write_text("""
+class Reader:
+    def __init__(self, *args, **kwargs): pass
+    def readtext(self, image, **kwargs):
+        if image.shape[:2] == (30, 90): return ['ab 123']
+        if image.shape[:2] == (30, 100): return ['cd 456']
+        raise ValueError('Unexpected crop size')
+""")
+            env = os.environ.copy()
+            env['PYTHONPATH'] = str(root) + os.pathsep + env.get('PYTHONPATH', '')
+            result = subprocess.run([sys.executable, 'plate_recognition.py', str(source), '--weights', str(weights), '--output', str(output)], env=env, capture_output=True, text=True)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertIn('Plate 1: AB123', result.stdout)
+            self.assertIn('Plate 2: CD456', result.stdout)
+            self.assertTrue(output.is_file())
+
 
 if __name__ == '__main__':
     unittest.main()
