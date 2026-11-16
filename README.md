@@ -83,6 +83,54 @@ python plate_recognition.py train-data/plates/YOLO/images/Train/filename_prefix_
 
 The CLI uses the original pretrained detector by default; pass `--weights` as shown to use your fine-tuned detector. Replace the weight path if your run printed a different directory. Weights, images, and output are not committed. Teammates can reproduce weights using the documented data and commands; review the dataset attribution and the pretrained model/runtime licenses before distributing derived weights. Validation metrics in the training log are for synthetic validation data and are not a held-out real-world accuracy result. In a smoke test using the fine-tuned weights on the user-provided `train-data/car.png`, the detector found a plate but OCR returned one extra character compared with the earlier pretrained-detector run. The smoke test used `python plate_recognition.py train-data/car.png --weights output/training/full/weights/best.pt --output output/ticket-04-demo.png`.
 
+## Our plate reader (CRNN)
+
+Instead of EasyOCR, the plate text can be read by our own small network: a CNN followed by a bidirectional LSTM, trained with CTC loss (`ocr_model.py`). It is trained first on generated Polish plates and then fine-tuned on real Polish plates.
+
+Real data: [Poland vehicle license plate dataset](https://www.kaggle.com/datasets/piotrstefaskiue/poland-vehicle-license-plate-dataset) (290 photos from Katowice with plate boxes and plate numbers). Download and unpack it to `train-data/katowice`, then cut out the plates. Plates are split by plate number (40% test, 20% validation, 40% train), so the same car is never in two splits:
+
+```sh
+python prepare_crops.py
+```
+
+Generate 50,000 fake Polish plates (fonts from Google Fonts, plus Bahnschrift on Windows):
+
+```sh
+python download_fonts.py
+python generate_plates.py
+```
+
+Train on the generated plates, then fine-tune on the real training plates:
+
+```sh
+python train_ocr.py --epochs 3 --output output/ocr/crnn_synthetic.pt
+python train_ocr.py --train train-data/katowice-crops/train --weights output/ocr/crnn_synthetic.pt --augment --lr 0.0001 --epochs 30 --output output/ocr/crnn_finetuned.pt
+```
+
+Measure the results on the real test plates and compare with EasyOCR:
+
+```sh
+python evaluate_ocr.py --weights output/ocr/crnn_finetuned.pt --show-errors
+python evaluate_ocr.py --model easyocr
+```
+
+Use it in the full program:
+
+```sh
+python plate_recognition.py car.jpg --weights output/training/full/weights/best.pt --ocr-weights output/ocr/crnn_finetuned.pt
+```
+
+Results on 115 real test plates (crops cut with the dataset's own boxes, not with our detector), on an Intel i7-9850H CPU:
+
+| Reader | Whole plate correct | Character error rate |
+|---|---|---|
+| EasyOCR (pretrained) | 14.8% | 105.7% |
+| CRNN, generated plates only (best of 3 epochs, 4.5 min each) | 60.9% | 11.6% |
+| CRNN, generated plates + fine-tuning on 116 real plates (24 s) | 90.4% | 3.7% |
+| CRNN, only 116 real plates, from scratch (100 epochs) | 0.0% | 98.2% |
+
+EasyOCR also reads the "PL" band and dealer text on plate frames, which explains the error rate above 100%. Most remaining CRNN errors are foggy, overexposed or motion-blurred photos. The test set is small (115 plates, mostly from the Silesian region), so the numbers have a few percent of uncertainty.
+
 ## Run checks
 
 ```sh

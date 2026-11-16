@@ -10,13 +10,19 @@ from PIL import Image, ImageDraw, ImageOps, UnidentifiedImageError
 class PlateRecognizer:
     """A small pretrained detector followed by pretrained optical character recognition."""
 
-    def __init__(self, weights):
+    def __init__(self, weights, ocr_weights=None):
         from ultralytics import YOLO
-        import easyocr
 
         self.detector = YOLO(str(weights))
-        # CPU works on macOS, Windows and Linux, without configuring a GPU.
-        self.reader = easyocr.Reader(['en'], gpu=False, model_storage_directory='models/easyocr', download_enabled=False)
+        self.crnn = None
+        self.reader = None
+        if ocr_weights is not None:
+            from ocr_model import load_model
+            self.crnn = load_model(ocr_weights)
+        else:
+            import easyocr
+            # CPU works on macOS, Windows and Linux, without configuring a GPU.
+            self.reader = easyocr.Reader(['en'], gpu=False, model_storage_directory='models/easyocr', download_enabled=False)
 
     def recognize(self, image):
         import numpy as np
@@ -29,9 +35,17 @@ class PlateRecognizer:
             right, bottom = min(image.width, right), min(image.height, bottom)
             if right <= left or bottom <= top:
                 continue
-            crop = image.crop((left, top, right, bottom))
-            fragments = self.reader.readtext(np.asarray(crop), detail=0, allowlist='ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789')
-            plates.append(((left, top, right, bottom), ''.join(fragments)))
+            if self.crnn is not None:
+                from ocr_model import read_plate
+                margin_x = int((right - left) * 0.05)
+                margin_y = int((bottom - top) * 0.1)
+                crop = image.crop((max(0, left - margin_x), max(0, top - margin_y),
+                                   min(image.width, right + margin_x), min(image.height, bottom + margin_y)))
+                plates.append(((left, top, right, bottom), read_plate(self.crnn, crop)))
+            else:
+                crop = image.crop((left, top, right, bottom))
+                fragments = self.reader.readtext(np.asarray(crop), detail=0, allowlist='ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789')
+                plates.append(((left, top, right, bottom), ''.join(fragments)))
         return plates
 
 
@@ -40,6 +54,7 @@ def main(argv=None, recognizer_factory=PlateRecognizer):
     parser.add_argument('image', type=Path, help='Input image')
     parser.add_argument('--output', type=Path, default=Path('output/annotated.png'), help='Annotated image path')
     parser.add_argument('--weights', type=Path, default=Path('models/plate-detector.pt'), help='Plate detector weights')
+    parser.add_argument('--ocr-weights', type=Path, help='Our CRNN weights; without this EasyOCR reads the plates')
     args = parser.parse_args(argv)
     try:
         if not args.image.is_file():
@@ -54,7 +69,12 @@ def main(argv=None, recognizer_factory=PlateRecognizer):
                 'For the original pretrained model, run python download_models.py; '
                 'for fine-tuned weights, run python train_detector.py.'
             )
-        recognizer = recognizer_factory(args.weights)
+        if args.ocr_weights is not None and not args.ocr_weights.is_file():
+            raise ValueError(f'CRNN weights not found: {args.ocr_weights}. Run python train_ocr.py first.')
+        if args.ocr_weights is None:
+            recognizer = recognizer_factory(args.weights)
+        else:
+            recognizer = recognizer_factory(args.weights, args.ocr_weights)
         detections = recognizer.recognize(image)
         draw = ImageDraw.Draw(image)
         for number, (box, text) in enumerate(detections, start=1):
